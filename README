@@ -1,17 +1,22 @@
-README for deft_v0.2
+README for deft_13
 
 Written by by Justin B. Kinney, Cold Spring Harbor Laboratory
 
-Last updated on 24 December 2013 
+Last updated on 11 April 2014 
 
 Reference: 
-    Kinney, J.B. (2013) Practical estimation of probability densities using scale-free field theories. arXiv:1312.6661 [physics.data-an]
+    Kinney, J.B. (2014) Rapid and deterministic estimation of probability densities using scale-free field theories.
+    arXiv:1312.6661 [physics.data-an]
+    
+Code: https://github.com/jbkinney/13_deft
+
+Note: An earlier version of this code was published on SourceForge at https://sourceforge.net/projects/densityestimation/. This will not be maintained and should be ignored.
 
 === Instructions ===
 
 All computations were performed using the Canopy Python Environment by Entought, available at https://www.enthought.com/products/canopy/ 
 
-The file "deft.py" contains all the density estmation routines of DEFT. Just copy this file to any directory in which you want to peform density estimation. 
+The file "deft.py" contains all the density estmation routines of DEFT. Just copy this file to any directory in which you want to peform density estimation. Note: kinney2013_utils.py is NOT required by deft.py
 
 To see a simple demsontration of DEFT in 1 dimension, run "demo.py"
 
