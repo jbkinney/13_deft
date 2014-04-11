@@ -1,0 +1,69 @@
+README for deft_v0.2
+
+Written by by Justin B. Kinney, Cold Spring Harbor Laboratory
+
+Last updated on 24 December 2013 
+
+Reference: 
+    Kinney, J.B. (2013) Practical estimation of probability densities using scale-free field theories. arXiv:1312.6661 [physics.data-an]
+
+=== Instructions ===
+
+All computations were performed using the Canopy Python Environment by Entought, available at https://www.enthought.com/products/canopy/ 
+
+The file "deft.py" contains all the density estmation routines of DEFT. Just copy this file to any directory in which you want to peform density estimation. 
+
+To see a simple demsontration of DEFT in 1 dimension, run "demo.py"
+
+To recreate Figs. 1 and 2, run "fig1_fig2_calculate.py", then "fig1_fig2_draw.py"
+
+To recreate Fig. 3, run "fig3_calculate.py", then "fig3_draw.py"
+
+To recreate Fig. 4, run "fig4_calculate.py", then "fig4_draw.py"
+
+=== FILES ===
+
+deft.py:
+	Contains all code for density estimation in 1D and 2D. See docstring for details.
+
+fig1_fig2_calculate.py:
+	Performs computations for Figs. 1 and 2
+	
+fig1_fig2_draw.py:
+	Draws Figs. 1 and 2
+	
+fig1.pdf:
+	Figure 1
+	
+fig2.pdf:
+	Figure 2
+	
+fig3_calculate.py:
+	Performs computations for Fig. 3
+	
+fig3_draw.py:
+	Draws Fig. 3
+	
+fig3.pdf:
+	Figure 3
+	
+fig4_calculate.py:
+	Performs computations for Fig. 4
+	
+fig4_draw.py:
+	Draws Fig. 4
+	
+fig4.pdf:
+	Figure 4
+
+dists.npy:
+	Data file containing results of comptuations for Fig. 3
+
+things_1d.pk:
+	Data file containing results of computations for Figs. 1 and 2
+
+things_2d.pk:
+	Data file containing results of computations for Fig. 4
+
+kinney2013_utils.py:
+	Contains miscellaneous functions used in the python scripts listed above. Is NOT required by deft.py
