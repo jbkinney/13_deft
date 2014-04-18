@@ -52,16 +52,15 @@ plt.figure(figsize=[ 11.625,   6.35 ])
 # Simulation parameters
 Ns = [30, 300, 3000]
 num_Ns = len(Ns)
-L = 20 # 20x20 grid
-G = L**2
+G = 20 # 20x20 grid
 
 # Define grid
 xmin = -5
 xmax = 5
 ymin = -5
 ymax = 5
-xedges = sp.linspace(xmin, xmax, L+1)
-yedges = sp.linspace(ymin, ymax, L+1)
+xedges = sp.linspace(xmin, xmax, G+1)
+yedges = sp.linspace(ymin, ymax, G+1)
 xgrid = midpoints(xedges)
 ygrid = midpoints(yedges)
 Xgrid, Ygrid = sp.meshgrid(xgrid, ygrid)
@@ -119,7 +118,7 @@ plt.clim(clim)
 # Save everything
 things = {}
 things['Ns'] = Ns
-things['L'] = L
+things['G'] = G
 things['xedges'] = xedges
 things['yedges'] = yedges
 things['Q_true'] = Q_true
@@ -149,7 +148,7 @@ for n,N in enumerate(Ns):
     plt.title(r'R, N=%d'%N)
     
     # Do DEFT calculation (alpha = 2)
-    Q_star_func2, results2 = deft_2d(xis, yis, bbox, alpha=2.0, details=True, verbose=True)
+    Q_star_func2, results2 = deft_2d(xis, yis, bbox, G=G, alpha=2.0, details=True, verbose=True)
     Q_star2 = results2.Q_star
     things['Q_star2s'].append(Q_star2)
     plt.subplot(num_Ns,7,3+7*n)
@@ -159,7 +158,7 @@ for n,N in enumerate(Ns):
     plt.title(r'Q, $\alpha$=%d, N=%d'%(2,N))
     
     # Do DEFT caclulation (alpha = 3)
-    Q_star_func3, results3 = deft_2d(xis, yis, bbox, alpha=3.0, details=True, verbose=True)
+    Q_star_func3, results3 = deft_2d(xis, yis, bbox, G=G, alpha=3.0, details=True, verbose=True)
     Q_star3 = results3.Q_star
     things['Q_star3s'].append(Q_star3)
     plt.subplot(num_Ns,7,4+7*n)
@@ -169,7 +168,7 @@ for n,N in enumerate(Ns):
     plt.title(r'Q, $\alpha$=%d, N=%d'%(3,N))
     
     # Do DEFT caclulation (alpha = 4)
-    Q_star_func4, results4 = deft_2d(xis, yis, bbox, alpha=4.0, details=True, verbose=True)
+    Q_star_func4, results4 = deft_2d(xis, yis, bbox, G=G, alpha=4.0, details=True, verbose=True)
     Q_star4 = results4.Q_star
     things['Q_star4s'].append(Q_star4)
     plt.subplot(num_Ns,7,5+7*n)
@@ -179,14 +178,14 @@ for n,N in enumerate(Ns):
     plt.title(r'Q, $\alpha$=%d, N=%d'%(4,N))
     
     # Compute KDE density estimate
-    Vs = sp.zeros([L**2,2])
+    Vs = sp.zeros([G**2,2])
     Vs[:,0] = Xgrid.flat
     Vs[:,1] = Ygrid.flat
     vis = sp.zeros([N,2])
     vis[:,0] = xis
     vis[:,1] = yis
     kde = gaussian_kde(vis.T)
-    Q_kde = sp.reshape(kde(Vs.T), [L, L]).T
+    Q_kde = sp.reshape(kde(Vs.T), [G, G]).T
     things['Q_kdes'].append(Q_kde)
     plt.subplot(num_Ns,7,6+7*n)
     plt.imshow(Q_kde, interpolation='nearest', cmap=cmap)
@@ -197,7 +196,7 @@ for n,N in enumerate(Ns):
     # Compute GMM density estimate using BIC
     max_K = 10
     bic_values = sp.zeros([max_K]);
-    Qs_gmm = sp.zeros([max_K,L**2])
+    Qs_gmm = sp.zeros([max_K,G**2])
     for k in sp.arange(1,max_K+1):
         gmm = mixture.GMM(int(k))
         gmm.fit(vis)
@@ -207,7 +206,7 @@ for n,N in enumerate(Ns):
     
     # Choose distribution with lowest BIC
     i_best = sp.argmin(bic_values)
-    Q_gmm = sp.reshape(Qs_gmm[i_best,:], [L,L]).T
+    Q_gmm = sp.reshape(Qs_gmm[i_best,:], [G,G]).T
     things['Q_gmms'].append(Q_gmm)
     
     plt.subplot(num_Ns,7,7+7*n)
@@ -220,7 +219,7 @@ for n,N in enumerate(Ns):
     things['data'].append(vis)
 
 # Save everything
-save_object(things, 'things_2d.pk')    
+#save_object(things, 'things_2d.pk')    
 plt.show()
 
 print 'fig4_calculate.py took %.2f seconds to execute'%(time.clock()-start_time) 

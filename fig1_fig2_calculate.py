@@ -56,7 +56,7 @@ xspan = xint - xmid
 gaussians = Q_true_details.gaussians
 
 # Perform DEFT density estimation
-Q_star, Q_star_details = deft_1d(xis, xmid+xspan, alpha=alpha, G=G, details=True, num_samples=20, verbose=True)
+Q_star, Q_star_details = deft_1d(xis, xmid+xspan, alpha=alpha, G=G, details=True, num_samples=20, tf_shift=-3, verbose=True)
 Q_star_wide3, Q_star_wide3_details = deft_1d(xis, xmid+3*xspan, alpha=alpha, G=3*G, details=True, verbose=True)
 Q_star_wide10, Q_star_wide10_details = deft_1d(xis, xmid+10*xint, alpha=alpha, G=10*G, details=True, verbose=True)
 Q_star_fine, Q_star_fine_details = deft_1d(xis, xmid+xspan, alpha=alpha, G=3*G, details=True, verbose=True)
@@ -65,7 +65,7 @@ Q_star_alpha1, Q_star_alpha1_details = deft_1d(xis, xmid+xspan, alpha=1, G=G, de
 Q_star_alpha3, Q_star_alpha3_details = deft_1d(xis, xmid+xspan, alpha=3, G=G, details=True, verbose=True)
 
 # Design plotting grid
-xs = sp.linspace(xint[0], xint[1], 1000)
+xs = sp.linspace(xint[0], xint[1], 10000)
 
 # Save everything
 things = {}
@@ -87,6 +87,6 @@ things['G'] = G
 things['gaussians'] = gaussians
 
 # Save everything
-save_object(things, 'things_1d.pk')
+# save_object(things, 'things_1d.pk')
     
 print 'fig1_fig2_calculate.py took %.2f seconds to execute'%(time.clock()-start_time) 

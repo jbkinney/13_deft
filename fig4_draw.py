@@ -47,7 +47,7 @@ plt.figure(figsize=[1*colwidth, 2.75])
 
 things = load_object('things_2d.pk')
 Ns = things['Ns']
-L = things['L']
+G = things['G']
 xedges = things['xedges']
 yedges = things['yedges']
 Q_true = things['Q_true']
@@ -71,7 +71,7 @@ ys = sp.linspace(min(yedges), max(yedges), M)
 # Simulation parameters
 cols = 18
 rows = 13
-G = L**2
+V = G**2
 panel_label_size = 14
 clim = [0, max(Q_true.flat[:])] 
 

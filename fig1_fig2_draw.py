@@ -3,7 +3,7 @@ fig1_fig2_draw.py
 
 Written by by Justin B. Kinney, Cold Spring Harbor Laboratory
 
-Last updated on 15 December 2013 
+Last updated on 16 April 2014 
 
 Description:
     Plots Figs. 1 and 2 of Kinney, 2013. Takes about 15 sec to execute on my
@@ -22,13 +22,11 @@ Loads:
 Saves:
    fig1.pdf
    fig2.pdf 
-            
-Reference: 
-    Kinney, J.B. (2013) Practical estimation of probability densities using scale-free field theories. arxiv preprint
 '''
 
 # Makes a simple figure demonstrating the inference proces. 
 import scipy as sp
+from scipy.interpolate import interp1d
 import matplotlib.pyplot as plt
 from pylab import cm
 from kinney2013_utils import load_object, get_dist_func_from_details
@@ -116,15 +114,29 @@ ax = plt.subplot2grid((4,1),(1, 0))
 ax.text(panel_label_x, panel_label_y,  '(b)', transform=ax.transAxes, 
       fontsize=panel_label_size, fontweight='bold', va='top', ha='right')
 
-Qs_image = Q_star_details.Qs
+# THIS IS WHAT NEEDS TO BE REPLACED. NEED TO INTERPOLATE Qs at selected
+# set of ells. 
+#Qs_image = Q_star_details.Qs
 
-# Set tick marks on x-axis
-log10_ells = sp.log10(Q_star_details.ells)
-dll = abs(log10_ells[1] - log10_ells[0])
-G = Qs_image.shape[1]
+# Get ell range
+log10_ells_raw = sp.log10(Q_star_details.ells)[::-1]
+log10_ell_i = max(log10_ells_raw)
+log10_ell_f = min(log10_ells_raw)
+
+# Get x range
+G = Q_star_details.Qs.shape[1]
 xmin = -5.0
 xmax = 5.0
-extent = [xmin, xmax, min(log10_ells)-dll/2.0, max(log10_ells)+dll/2.0]
+
+# Set extent for plotting
+extent = [xmin, xmax, log10_ell_f, log10_ell_i]
+
+# Interploate Qs at 300 different ells
+K = 300
+Qs_raw = Q_star_details.Qs[::-1,:]
+log10_ells_grid = sp.linspace(log10_ell_f, log10_ell_i, K)
+Qs_interp_func = interp1d(log10_ells_raw, Qs_raw, axis=0, kind='cubic')
+Qs_image = Qs_interp_func(log10_ells_grid)[::-1]
 
 plt.imshow(Qs_image, aspect='auto', cmap=cm.gray, interpolation='nearest', extent=extent)
 plt.clim([0, max(Q_star_details.Q_star)])
@@ -154,14 +166,15 @@ plt.semilogx(Q_star_details.ells, ys, color='k', linewidth=1)
 plt.xlim(xl)
 plt.xlabel('$\ell$')
 ax.xaxis.set_label_coords(.5, -0.25)
-plt.ylabel('$\ln\ p(\ell|$data$)$')
+plt.ylabel('$\ln\ p(\ell|$data$)$\t')
 yspan = max(ys) - uniform
 ymax = max(ys) + 0.05*yspan #ymax = uniform + 1.2*yspan
-ymin = min(ys) - 0.05*yspan #ymin = uniform - 1.2*yspan
+ymin = max(ys) - 100 #min(ys) - 0.05*yspan #ymin = uniform - 1.2*yspan
 
 # Compute limits on ell
-for k in range(Q_star_details.num_samples):
-    ell = Q_star_details.ells[Q_star_details.is_sampled[k]] 
+num_samples = Q_star_details.num_samples
+for k in range(num_samples):
+    ell = Q_star_details.ells_sampled[k]
     plt.semilogx(ell*sp.array([1, 1]), [ymin, ymax], color=orange, linewidth=1, alpha=0.3)
 
 plt.semilogx(Q_star_details.ell_star*sp.array([1, 1]), [ymin, ymax], color=lightblue, linewidth=2)
@@ -182,11 +195,26 @@ plt.setp(patches, 'facecolor', lightgray, 'edgecolor', 'none')
 plt.plot(xs, Q_true(xs), '-', color='k', linewidth=1)
 
 # Plot samples drawn from posterior
-plt.plot(Q_star_details.xgrid, Q_star_details.Qs_sampled.T, '-', color=orange, linewidth=1, alpha=0.3)
+#plt.plot(Q_star_details.xgrid, Q_star_details.Qs_sampled.T, '-', color=orange, linewidth=1, alpha=0.3)
+num_samples = Q_star_details.num_samples
+extended_xgrid = Q_star_details.extended_xgrid
+for k in range(num_samples):
+    
+    # This is very annoying. Have to extend Q on either side by 1 grid point 
+    # to do interpolation
+    Q = Q_star_details.Qs_sampled[k,:]
+    extended_Q = sp.zeros(G+2)
+    extended_Q[1:-1] = Q
+    end_Q = 0.5*(Q[0]+Q[-1])
+    extended_Q[0] = end_Q
+    extended_Q[-1] = end_Q
+    Q_sampled_func = interp1d(extended_xgrid, extended_Q, kind='cubic')
+
+    # Plot sampled Q
+    plt.plot(xs, Q_sampled_func(xs), '-', color=orange, linewidth=1, alpha=0.3)
 
 # Plot Q_star distribution
 plt.plot(xs, Q_star(xs), '-', color=lightblue, linewidth=2)
-
 
 plt.yticks([])    
 #plt.xticks([])
@@ -206,7 +234,7 @@ plt.savefig('fig1.pdf')
 ###
 
 plt.figure(figsize=[1*colwidth, 3.6])
-
+panel_label_y = 1.0
 #
 # Panel A
 #

@@ -29,9 +29,9 @@ import time
 ###
 
 # Synthesize data (use mixture of two Gaussians)
-N = 100
-x1s = 1.0*sp.random.randn(sp.floor(N/2)) + 4.0
-x2s = 1.0*sp.random.randn(sp.ceil(N/2))
+N = 50
+x1s = 1.0*sp.random.randn(int(N/2)) + 4.0
+x2s = 1.0*sp.random.randn(N - int(N/2))
 xs = sp.concatenate((x1s, x2s))
 Q_true = lambda x: (sp.exp(-(x**2)/2.0)/(2*sp.sqrt(2*sp.pi))) + (sp.exp(-((x-4.0)**2)/2.0)/(2*sp.sqrt(2*sp.pi)))
 
@@ -43,7 +43,7 @@ Q_true = lambda x: (sp.exp(-(x**2)/2.0)/(2*sp.sqrt(2*sp.pi))) + (sp.exp(-((x-4.0
 G = 100
 
 # Set power of derivative to constrain
-alpha = 2
+alpha = 3
 
 # Set bounding box used by DEFT
 bbox = [-5.0, 10.0]
@@ -69,6 +69,7 @@ xgrid = sp.linspace(bbox[0], bbox[1], 1000)
 plt.plot(xgrid, Q_true(xgrid), linewidth=2, color='black', label='Q_true')
 plt.plot(xgrid, Q_star(xgrid), linewidth=4, color=[0,.3,1], label='Q_star')
 plt.title(s)
+plt.ylim([0, 2*max(Q_true(xgrid))])
 
 plt.legend()
 # Show plot

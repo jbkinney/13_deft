@@ -9,7 +9,9 @@ Description:
     Density Estimation using Field Theory (DEFT) in 1D and 2D
 
 Reference: 
-    Kinney, J.B. (2013) Practical estimation of probability densities using scale-free field theories. arxiv preprint
+    Kinney, J.B. (2013) Rapid and deterministic estimation of probability 
+    densities using scale-free field theories.
+    arXiv:1312.6661 [physics.data-an].
 
 Functions:
     deft_1d: Performs density estimation in one dimension
@@ -24,7 +26,7 @@ Dependencies:
 
 # Import stuff
 import scipy as sp
-from scipy.integrate import odeint
+from scipy.integrate import ode
 from scipy.fftpack import fft, ifft, fft2, ifft2
 from scipy.linalg import eig, det
 from scipy.interpolate import interp1d, RectBivariateSpline
@@ -33,14 +35,33 @@ from scipy.sparse.linalg import spsolve
 from numpy.random import choice, randn
 from copy import deepcopy
 import time
+import warnings
 
 # Empty container class for storing results
 class Results: pass;
 
+# Used to compute the log determinant of Lambda
+def get_log_det_Lambda(Lambda, coeff):
+    G = Lambda.shape[0]
+    ok_value = False
+    while not ok_value:
+        f = sp.log(det(coeff*Lambda))
+        if f == -sp.inf:
+            coeff *= 1.5
+            #print '+'
+        elif f == sp.inf:
+            coeff /= 1.5
+            #print '-'
+        else: 
+            ok_value = True
+    log_det = f - G*sp.log(coeff) 
+    return log_det, coeff
+
 ################################################################################
 # 1D DEFT
 ################################################################################
-def deft_1d(xis_raw, bbox, G=100, alpha=2, num_samples=0, num_ts=100, ti_shift=-5, tf_shift=0, verbose=False, details=False):
+def deft_1d(xis_raw, bbox, G=100, alpha=2, num_samples=0, ti_shift=-5, 
+    tf_shift=0, tol=1E-3, verbose=False, details=False):
     '''
     Performs DEFT density estimation in 1D
     
@@ -129,6 +150,7 @@ def deft_1d(xis_raw, bbox, G=100, alpha=2, num_samples=0, num_ts=100, ti_shift=-
     
     # Histogram data
     [R, xxx] = sp.histogram(zis, zedges, normed=1)
+    R_col = sp.mat(R).T
     
     ###
     ### Use weak-field approximation to get phi_0	
@@ -176,18 +198,15 @@ def deft_1d(xis_raw, bbox, G=100, alpha=2, num_samples=0, num_ts=100, ti_shift=-
     #    print 'Integrating from t_i == %f to t_f == %f'%(t_i, t_f)
     
     # Set integrationt times
-    ts = sp.linspace(t_i,t_f,num_ts)
+    #ts = sp.linspace(t_i,t_f,num_ts)
     
     # Compute ells in terms of ts: exp(ts) = N/ell^(2 alpha - 1)
     # Note: this is in dx = 1 units!
-    ells = (N/sp.exp(ts))**(1.0/(2.0*alpha-1.0))
+    #ells = (N/sp.exp(ts))**(1.0/(2.0*alpha-1.0))
     
     ###
     ### Integrate ODE
     ###
-    
-    # Initialize phis
-    phis = sp.zeros([L,num_ts])
     
     # Create periodic laplacian matrix (not sparse)
     delsq = sp.eye(L,L,-1) + sp.eye(L,L,+1) - 2*sp.eye(L)        
@@ -198,86 +217,118 @@ def deft_1d(xis_raw, bbox, G=100, alpha=2, num_samples=0, num_ts=100, ti_shift=-
     Delta = csr_matrix(-delsq)**alpha
     
     # This is the key function: computes deriviate of phi for ODE integration
-    def this_flow(phi, t):
+    def this_flow(t, phi):
         
-        # Compute distribution Q corresponding to phi
-        Q = sp.exp(-phi)/L
-        
-        # This matrix in invertible for all t > 0
-        A = Delta*sp.exp(-t) + diags(Q, 0)
-        
-        # Solve A*phidt = Q-R
-        dphidt = spsolve(A, Q - R) 
-                    
+        # Compute distribution Q corresponding to phi     
+        Q = sp.exp(-phi)/G
+        A = Delta + sp.exp(t)*diags(Q,0)
+        dphidt = sp.real(spsolve(A, sp.exp(t)*(Q-R)))     
+                         
         # Return the time derivative of phi
         return dphidt
-        
+   
+    backend = 'vode'
+    solver = ode(this_flow).set_integrator(backend, nsteps=1, atol=tol, rtol=tol)
+    solver.set_initial_value(phi0, t_i)
+    # suppress Fortran-printed warning
+    solver._integrator.iwork[2] = -1
+    warnings.filterwarnings("ignore", category=UserWarning)
+    
+    # Make containers        
+    phis = []
+    ts = []
+    log_evidence = []
+    Qs = []
+    ells = []
+    log_dets = []  
+    
+    # Will keep initial phi to check that integration is working well
+    phi0_col = sp.mat(phi0).T
+    kinetic0 = (phi0_col.T*Delta*phi0_col)[0,0]
+          
     # Integrate phi over specified ts
-    phis = odeint(this_flow, phi0, ts)
+    #phis = odeint(this_flow, phi0, ts)
+    
+    # Integrate phi over specified t range. 
+    integration_start_time = time.clock()
+    keep_going = True
+    max_log_evidence = -sp.Inf
+    coeff = 1.0
+    while solver.t < t_f and keep_going:
+        
+        # Step integrator 
+        solver.integrate(t_f, step=True)
+        
+        # Compute deteriminant.
+        phi = solver.y
+        t = solver.t
+        beta = N*sp.exp(-t)
+        ell = (N/sp.exp(t))**(1.0/(2.0*alpha-1.0))
+        
+        # Compute new distribution
+        Q = sp.exp(-phi)/sum(sp.exp(-phi)) 
+        phi_col = sp.mat(phi).T
+        
+        # Check that S[phi] < S[phi0]. If not, phi might just be fucked up, due to the 
+        # integration having to solve a degenerate system of equations. 
+        # In this case, set phi = phi0 and restart integration from there. 
+        S = 0.5*(phi_col.T*Delta*phi_col)[0,0] + sp.exp(t)*(R_col.T*phi_col)[0,0] + sp.exp(t)*sum(sp.exp(-phi)/G)
+        S0 = 0.5*(phi0_col.T*Delta*phi0_col)[0,0] + sp.exp(t)*(R_col.T*phi0_col)[0,0] + sp.exp(t)*sum(sp.exp(-phi0)/G)
+        if S0 < S:
+            t_i = t_i + 0.5
+            solver = ode(this_flow).set_integrator(backend, nsteps=1, atol=tol, rtol=tol)
+            solver.set_initial_value(phi0, t_i)
+            
+            # Reset containers
+            phis = []
+            ts = []
+            log_evidence = []
+            Qs = []
+            ells = []
+            log_dets = []
+            
+            keep_going = True
+            max_log_evidence = -sp.Inf
+            #print 'Restarting integration at t_i = %f'%t_i
+            
+        else:
+            # Compute betaS directly again to minimize multiplying very large
+            # numbers by very small numbers. Also, subtract initial kinetic term
+            betaS = beta*0.5*(phi_col.T*Delta*phi_col-kinetic0)[0,0] + N*(R_col.T*phi_col)[0,0] + N              
+                                            
+            # Compute the log determinant of Lambda
+            Lambda = Delta + sp.exp(t)*sp.diag(Q)
+            log_det_Lambda, coeff = get_log_det_Lambda(Lambda, coeff)
+            log_evidence_value = - betaS - 0.5*log_det_Lambda + 0.5*alpha*t #sp.log(beta) 
+            if log_evidence_value > max_log_evidence:
+                max_log_evidence = log_evidence_value
+            if (log_evidence_value < max_log_evidence - 300) and (ell < G):
+                keep_going = False
+            
+            # Record shit
+            phis.append(phi)
+            ts.append(t)
+            ells.append(ell)
+            Qs.append(Q)
+            log_evidence.append(log_evidence_value)
+            log_dets.append(log_det_Lambda)
+        
+    warnings.resetwarnings()
+    if verbose:
+        print 'Integration took %0.2f seconds.'%(time.clock()-integration_start_time)
+    
+    # Set ts and ells
+    ts = sp.array(ts)
+    phis = sp.array(phis)
+    Qs = sp.array(Qs)
+    ells = sp.array(ells)
+    log_evidence = sp.array(log_evidence)
+    #num_ts = len(ts)
     
     ###
     ### Identify optimal lengthscale
     ###
-    
-    # Initialize containers
-    log_evidence = sp.nan*sp.zeros(num_ts)
-    S = sp.zeros(num_ts)
-    log_det_Lambda = sp.zeros(num_ts)
-    Qs = sp.zeros([num_ts, L])
-    R_col = sp.mat(R).T
-    coeff = 1.0
-    
-    # Compute log evidence for each t in ts
-    for i in range(num_ts):
-        
-        # Get t corresonding to time ts[i]
-        t = ts[i]
-        
-        # Get lengthscale correspondin to time ts[i]
-        ell = ells[i]    
-                
-        # Get field at time ts[i]
-        phi = phis[i,:]
-        
-        # Renormalize phi just in case
-        Q = sp.exp(-phi)/sum(sp.exp(-phi))
-        phi = -sp.log(L*Q)
-        phi_col = sp.mat(phi).T
-        Qs[i] = Q
-        beta = ell**(2.0*alpha-1.0)
-        
-        # Compute the value of the action of classical path at ts[i] 
-        if all(sp.isfinite(phi_col)):
-            S[i] = 0.5*(phi_col.T*Delta*phi_col) + sp.exp(t)*(R_col.T*phi_col)[0,0] + sp.exp(t)
-        else:
-            S[i] = sp.inf
-        
-        # Compute exact fluctuating determinant 
-        # Note: the Lambda matrix often needs to be rescaled to prevent
-        # numerical prblems. This loop does that automatically
-        Lambda = Delta + sp.exp(t)*sp.diag(Q)
-        ok_value = False
-        while not ok_value:
-            f = sp.log(det(coeff*Lambda))
-            if f == -sp.inf:
-                coeff *= 1.5
-                print '%d:+'%i
-            elif f == sp.inf:
-                coeff /= 1.5
-                print '%d:-'%i
-            else: 
-                ok_value = True
-        log_det_Lambda[i] = f - L*sp.log(coeff) 
-        
-        # If i = 0, i.e. largest value of \ell, compute the deteriminant ratio
-        # in weak field approximation. Use to compute log_det_nc_Delta
-        if i == 0:
-            fluct_wf = t + sum(sp.log(1.0 + sp.exp(t - tau_ks)))
-            log_det_nc_Delta = log_det_Lambda[i] - fluct_wf
-            
-        # Compute evidence for each ell with correct proportionality constant
-        log_evidence[i] = (N + 0.5*sp.sqrt(N) - N*sp.log(G)) - beta*S[i] - 0.5*sp.log(beta) - 0.5*(log_det_Lambda[i] - log_det_nc_Delta)
-    
+
     # Noramlize weights for different ells
     # Note: ells are logarithmically distributed
     # So Jeffery's prior is flat
@@ -299,6 +350,25 @@ def deft_1d(xis_raw, bbox, G=100, alpha=2, num_samples=0, num_ts=100, ti_shift=-
     ### Sample from posterior (only if requirested)
     ###
     
+    # Get ell range
+    log_ells_raw = sp.log(ells)[::-1]
+    log_ell_i = max(log_ells_raw)
+    log_ell_f = min(log_ells_raw)
+    
+    # Interploate Qs at 300 different ells
+    K = 1000
+    phis_raw = phis[::-1,:]
+    log_ells_grid = sp.linspace(log_ell_f, log_ell_i, K)
+    
+    # Create function to get interpolated phis
+    phis_interp_func = interp1d(log_ells_raw, phis_raw, axis=0, kind='cubic')
+    
+    # Compute weights for each ell on the fine grid
+    log_weights_func = interp1d(log_ells_raw, sp.log(ell_weights[::-1]), kind='cubic')
+    log_weights_grid = log_weights_func(log_ells_grid)
+    weights_grid = sp.exp(log_weights_grid)
+    weights_grid /= sum(weights_grid)
+    
     # If user requests samples
     if num_samples > 0:
     
@@ -312,14 +382,16 @@ def deft_1d(xis_raw, bbox, G=100, alpha=2, num_samples=0, num_ts=100, ti_shift=-
         # Initialize container variables      
         Qs_sampled = sp.zeros([num_samples, L])
         phis_sampled = sp.zeros([num_samples, L])
-        is_sampled = sp.zeros([num_samples])
-    
+        #is_sampled = sp.zeros([num_samples])
+        log_ells_sampled = sp.zeros([num_samples])
+        
         for j in range(num_samples):
             
             # First choose a classical path based on 
-            i = choice(num_ts, p=ell_weights)
-            phi_cl = phis[i,:]
-            is_sampled[j] = int(i)
+            i = choice(K, p=weights_grid)
+            phi_cl = phis_interp_func(log_ells_grid[i])
+            #is_sampled[j] = int(i)
+            log_ells_sampled[j] = log_ells_grid[i]
         
             # Draw random amplitudes for all modes and compute dphi
             etas = randn(L)
@@ -383,7 +455,8 @@ def deft_1d(xis_raw, bbox, G=100, alpha=2, num_samples=0, num_ts=100, ti_shift=-
     if num_samples > 0:
         results.phis_sampled = phis_sampled
         results.Qs_sampled = Qs_sampled/dx
-        results.is_sampled = is_sampled
+        #results.is_sampled = is_sampled
+        results.ells_sampled = sp.exp(log_ells_sampled)*dx
     
     # Stop time
     time_elapsed = time.clock() - start_time
@@ -399,7 +472,7 @@ def deft_1d(xis_raw, bbox, G=100, alpha=2, num_samples=0, num_ts=100, ti_shift=-
 # 2D DEFT
 ################################################################################
 
-def deft_2d(xis_raw, yis_raw, bbox, G=20, alpha=2, num_samples=0, num_ts=100, ti_shift=-5, tf_shift=0, verbose=False, details=False):
+def deft_2d(xis_raw, yis_raw, bbox, G=20, alpha=2, num_samples=0, tol=1E-3, ti_shift=-1, tf_shift=0, verbose=False, details=False):
     '''
     Performs DEFT density estimation in 2D
     
@@ -505,6 +578,7 @@ def deft_2d(xis_raw, yis_raw, bbox, G=20, alpha=2, num_samples=0, num_ts=100, ti
     [H, xxx, yyy] = sp.histogram2d(xzis, yzis, [xzedges, yzedges])
     R = H/N
     R_flat = R.flatten()
+    R_col = sp.mat(R_flat).T
     
     ###
     ### Use weak-field approximation to get phi_0	
@@ -547,18 +621,18 @@ def deft_2d(xis_raw, yis_raw, bbox, G=20, alpha=2, num_samples=0, num_ts=100, ti
     #    print 'Integrating from t_i == %f to t_f == %f'%(t_i, t_f)
     
     # Set integrationt times
-    ts = sp.linspace(t_i,t_f,num_ts)
+    #ts = sp.linspace(t_i,t_f,num_ts)
     
     # Compute ells in terms of ts: exp(ts) = N/ell^(2 alpha - 2)
     # Note: this is in dx = 1 units!
-    ells = (N/sp.exp(ts))**(1.0/(2.0*alpha-2.0))
+    #ells = (N/sp.exp(ts))**(1.0/(2.0*alpha-2.0))
     
     ###
     ### Integrate ODE
     ###
     
     # Initialize phis
-    phis = sp.zeros([V,num_ts])
+    #phis = sp.zeros([V,num_ts])
     
     # Build 2D Laplacian matrix
     delsq_2d = (-4.0*sp.eye(V) + 
@@ -569,87 +643,196 @@ def deft_2d(xis_raw, yis_raw, bbox, G=20, alpha=2, num_samples=0, num_ts=100, ti
     
     # Make Delta, and make it sparse
     Delta = csr_matrix(-delsq_2d)**alpha
-    
+  
     # This is the key function: computes deriviate of phi for ODE integration
-    def this_flow(phi, t):
+    def this_flow(t, phi):
         
-        # Compute distribution Q corresponding to phi
+        # Compute distribution Q corresponding to phi     
         Q = sp.exp(-phi)/V
-        
-        # This matrix in invertible for all t > 0
-        A = Delta*sp.exp(-t) + diags(Q, 0)
-        
-        # Solve A*phidt = Q-R
-        dphidt = spsolve(A, Q - R_flat) 
-                    
+        A = Delta + sp.exp(t)*diags(Q,0)
+        dphidt = sp.real(spsolve(A, sp.exp(t)*(Q-R_flat)))     
+                         
         # Return the time derivative of phi
         return dphidt
-        
-    # Integrate phi over specified ts    
-    phis = odeint(this_flow, phi0, ts)
+   
+    backend = 'vode'
+    solver = ode(this_flow).set_integrator(backend, nsteps=1, atol=tol, rtol=tol)
+    solver.set_initial_value(phi0, t_i)
+    # suppress Fortran-printed warning
+    solver._integrator.iwork[2] = -1
+    warnings.filterwarnings("ignore", category=UserWarning)
     
-    ###
-    ### Identify optimal lengthscale
-    ###
+    # Make containers        
+    phis = []
+    ts = []
+    log_evidence = []
+    Qs = []
+    ells = []
+    log_dets = []  
     
-    # Initialize containers
-    log_evidence = sp.nan*sp.zeros(num_ts)
-    S = sp.zeros(num_ts)
-    log_det_Lambda = sp.zeros(num_ts)
-    Qs = sp.zeros([num_ts, G, G])
-    R_col = sp.mat(sp.ravel(R)).T
+    # Will keep initial phi to check that integration is working well
+    phi0_col = sp.mat(phi0).T
+    kinetic0 = (phi0_col.T*Delta*phi0_col)[0,0]
+          
+    # Integrate phi over specified ts
+    #phis = odeint(this_flow, phi0, ts)
+    
+    # Integrate phi over specified t range. 
+    integration_start_time = time.clock()
+    keep_going = True
+    max_log_evidence = -sp.Inf
     coeff = 1.0
-    
-    # Compute log evidence for each t in ts
-    for i in range(num_ts):
+    while solver.t < t_f and keep_going:
         
-        # Get M corresonding to time ts[i]
-        t = ts[i]
+        # Step integrator 
+        solver.integrate(t_f, step=True)
         
-        # Get lengthscale correspondin to time ts[i]
-        ell = ells[i]    
-                
-        # Get field at time ts[i]
-        phi = phis[i,:]
+        # Compute deteriminant.
+        phi = solver.y
+        t = solver.t
+        beta = N*sp.exp(-t)
+        ell = (N/sp.exp(t))**(1.0/(2.0*alpha-2.0))
         
-        # Renormalize phi just in case
-        Q = sp.exp(-phi)/sum(sp.exp(-phi))
-        phi = -sp.log(V*Q); 
-        phi_col = sp.mat(phi).T; 
-        Qs[i,:,:] = sp.reshape(Q,[L,L])
-        beta = ell**(2.0*alpha-2.0)
+        # Compute new distribution
+        Q = sp.exp(-phi)/sum(sp.exp(-phi)) 
+        phi_col = sp.mat(phi).T
         
-        # Compute the value of the action of classical path at ts[i] 
-        if all(sp.isfinite(phi_col)):
-            S[i] = 0.5*(phi_col.T*Delta*phi_col) + sp.exp(t)*(R_col.T*phi_col)[0,0] + sp.exp(t)
-        else:
-            S[i] = sp.inf
+        # Check that S[phi] < S[phi0]. If not, phi might just be fucked up, due to the 
+        # integration having to solve a degenerate system of equations. 
+        # In this case, set phi = phi0 and restart integration from there. 
+        S = 0.5*(phi_col.T*Delta*phi_col)[0,0] + sp.exp(t)*(R_col.T*phi_col)[0,0] + sp.exp(t)*sum(sp.exp(-phi)/G)
+        S0 = 0.5*(phi0_col.T*Delta*phi0_col)[0,0] + sp.exp(t)*(R_col.T*phi0_col)[0,0] + sp.exp(t)*sum(sp.exp(-phi0)/G)
+        if S0 < S:
+            t_i = t_i + 0.5
+            solver = ode(this_flow).set_integrator(backend, nsteps=1, atol=tol, rtol=tol)
+            solver.set_initial_value(phi0, t_i)
             
-        # Compute exact fluctuating determinant 
-        # This requires dynamically fiddling with the overall scale of lambda
-        # to avoid infinities. Should find a more sensible way to do this
-        Lambda = Delta + sp.exp(t)*sp.diag(Q)
-        ok_value = False
-        while not ok_value:
-            f = sp.log(det(coeff*Lambda))
-            if f == -sp.inf:
-                coeff *= 1.5
-                #print '%d:+'%i
-            elif f == sp.inf:
-                coeff /= 1.5
-                #print '%d:-'%i
-            else: 
-                ok_value = True
-        log_det_Lambda[i] = f  - V*sp.log(coeff)
+            # Reset containers
+            phis = []
+            ts = []
+            log_evidence = []
+            Qs = []
+            ells = []
+            log_dets = []
+            
+            keep_going = True
+            max_log_evidence = -sp.Inf
+            #print 'Restarting integration at t_i = %f'%t_i
+            
+        else:
+            # Compute betaS directly again to minimize multiplying very large
+            # numbers by very small numbers. Also, subtract initial kinetic term
+            betaS = beta*0.5*(phi_col.T*Delta*phi_col-kinetic0)[0,0] + N*(R_col.T*phi_col)[0,0] + N              
+                                            
+            # Compute the log determinant of Lambda
+            Lambda = Delta + sp.exp(t)*sp.diag(Q)
+            log_det_Lambda, coeff = get_log_det_Lambda(Lambda, coeff)
+            log_evidence_value = - betaS - 0.5*log_det_Lambda + 0.5*alpha*t #sp.log(beta) 
+            if log_evidence_value > max_log_evidence:
+                max_log_evidence = log_evidence_value
+            if (log_evidence_value < max_log_evidence - 300) and (ell < G):
+                keep_going = False
+            
+            # Record shit
+            phis.append(phi)
+            ts.append(t)
+            ells.append(ell)
+            Qs.append(Q)
+            log_evidence.append(log_evidence_value)
+            log_dets.append(log_det_Lambda)
         
-        # If i = 0, i.e. largest value of \ell, compute the deteriminant ratio
-        # in weak field approximation. Use to compute log_det_nc_Delta
-        if i == 0:
-            fluct_wf = t + sum(sum(sp.log(1.0 + sp.exp(t - tau_ks))))
-            log_det_nc_Delta = log_det_Lambda[i] - fluct_wf
-        
-        # Compute evidence for each ell with correct proportionality constant
-        log_evidence[i] = (N + 0.5*sp.sqrt(N) - N*sp.log(V)) - beta*S[i] - 0.5*sp.log(beta) - 0.5*(log_det_Lambda[i] - log_det_nc_Delta)
+    warnings.resetwarnings()
+    if verbose:
+        print 'Integration took %0.2f seconds.'%(time.clock()-integration_start_time)  
+    
+    # Set ts and ells
+    ts = sp.array(ts)
+    phis = sp.array(phis)
+    Qs = sp.array(Qs)
+    ells = sp.array(ells)
+    log_evidence = sp.array(log_evidence)
+    #num_ts = len(ts)        
+                            
+    ## This is the key function: computes deriviate of phi for ODE integration
+    #def this_flow(phi, t):
+    #    
+    #    # Compute distribution Q corresponding to phi
+    #    Q = sp.exp(-phi)/V
+    #    
+    #    # This matrix in invertible for all t > 0
+    #    A = Delta*sp.exp(-t) + diags(Q, 0)
+    #    
+    #    # Solve A*phidt = Q-R
+    #    dphidt = spsolve(A, Q - R_flat) 
+    #                
+    #    # Return the time derivative of phi
+    #    return dphidt
+    #    
+    ## Integrate phi over specified ts    
+    #phis = odeint(this_flow, phi0, ts)
+    #
+    ####
+    #### Identify optimal lengthscale
+    ####
+    #
+    ## Initialize containers
+    #log_evidence = sp.nan*sp.zeros(num_ts)
+    #S = sp.zeros(num_ts)
+    #log_det_Lambda = sp.zeros(num_ts)
+    #Qs = sp.zeros([num_ts, G, G])
+    #R_col = sp.mat(sp.ravel(R)).T
+    #coeff = 1.0
+    #
+    ## Compute log evidence for each t in ts
+    #for i in range(num_ts):
+    #    
+    #    # Get M corresonding to time ts[i]
+    #    t = ts[i]
+    #    
+    #    # Get lengthscale correspondin to time ts[i]
+    #    ell = ells[i]    
+    #            
+    #    # Get field at time ts[i]
+    #    phi = phis[i,:]
+    #    
+    #    # Renormalize phi just in case
+    #    Q = sp.exp(-phi)/sum(sp.exp(-phi))
+    #    phi = -sp.log(V*Q); 
+    #    phi_col = sp.mat(phi).T; 
+    #    Qs[i,:,:] = sp.reshape(Q,[L,L])
+    #    beta = ell**(2.0*alpha-2.0)
+    #    
+    #    # Compute the value of the action of classical path at ts[i] 
+    #    if all(sp.isfinite(phi_col)):
+    #        S[i] = 0.5*(phi_col.T*Delta*phi_col) + sp.exp(t)*(R_col.T*phi_col)[0,0] + sp.exp(t)
+    #    else:
+    #        S[i] = sp.inf
+    #        
+    #    # Compute exact fluctuating determinant 
+    #    # This requires dynamically fiddling with the overall scale of lambda
+    #    # to avoid infinities. Should find a more sensible way to do this
+    #    Lambda = Delta + sp.exp(t)*sp.diag(Q)
+    #    ok_value = False
+    #    while not ok_value:
+    #        f = sp.log(det(coeff*Lambda))
+    #        if f == -sp.inf:
+    #            coeff *= 1.5
+    #            #print '%d:+'%i
+    #        elif f == sp.inf:
+    #            coeff /= 1.5
+    #            #print '%d:-'%i
+    #        else: 
+    #            ok_value = True
+    #    log_det_Lambda[i] = f  - V*sp.log(coeff)
+    #    
+    #    # If i = 0, i.e. largest value of \ell, compute the deteriminant ratio
+    #    # in weak field approximation. Use to compute log_det_nc_Delta
+    #    if i == 0:
+    #        fluct_wf = t + sum(sum(sp.log(1.0 + sp.exp(t - tau_ks))))
+    #        log_det_nc_Delta = log_det_Lambda[i] - fluct_wf
+    #    
+    #    # Compute evidence for each ell with correct proportionality constant
+    #    log_evidence[i] = (N + 0.5*sp.sqrt(N) - N*sp.log(V)) - beta*S[i] - 0.5*sp.log(beta) - 0.5*(log_det_Lambda[i] - log_det_nc_Delta)
     
     # Noramlize weights for different ells and save
     ell_weights = sp.exp(log_evidence) - max(log_evidence)
@@ -670,10 +853,59 @@ def deft_2d(xis_raw, yis_raw, bbox, G=20, alpha=2, num_samples=0, num_ts=100, ti
     ### Sample from posterior (only if requirested)
     ###
     
+    ## If user requests samples
+    #if num_samples > 0:
+    #
+    #    Lambda_star = (ell_star**(2.0*alpha-120))*(Delta + M_star*sp.diag(Q_star))    
+    #    eigvals, eigvecs = eig(Lambda_star)
+    #    
+    #    # Lambda_star is Hermetian; shouldn't need to do this
+    #    eigvals = sp.real(eigvals) 
+    #    eigvecs = sp.real(eigvecs)                      
+    #    
+    #    # Initialize container variables      
+    #    Qs_sampled = sp.zeros([num_samples, G, G])
+    #    phis_sampled = sp.zeros([num_samples, V])
+    #    is_sampled = sp.zeros([num_samples])
+    #
+    #    for j in range(num_samples):
+    #        
+    #        # First choose a classical path based on 
+    #        i = choice(num_ts, p=ell_weights)
+    #        phi_cl = phis[i,:]
+    #        is_sampled[j] = i
+    #    
+    #        # Draw random amplitudes for all modes and compute dphi
+    #        etas = randn(L)
+    #        dphi = sp.ravel(sp.real(sp.mat(eigvecs)*sp.mat(etas/sp.sqrt(eigvals)).T))
+    #
+    #        # Record final sampled phi 
+    #        phi = phi_cl + dphi
+    #        Qs_sampled[j,:,:] = sp.reshape(sp.exp(-phi)/sum(sp.exp(-phi)), [G,G])
+  
+    # Get ell range
+    log_ells_raw = sp.log(ells)[::-1]
+    log_ell_i = max(log_ells_raw)
+    log_ell_f = min(log_ells_raw)
+    
+    # Interploate Qs at 300 different ells
+    K = 1000
+    phis_raw = phis[::-1,:]
+    log_ells_grid = sp.linspace(log_ell_f, log_ell_i, K)
+    
+    # Create function to get interpolated phis
+    phis_interp_func = interp1d(log_ells_raw, phis_raw, axis=0, kind='cubic')
+    
+    # Compute weights for each ell on the fine grid
+    log_weights_func = interp1d(log_ells_raw, sp.log(ell_weights[::-1]), kind='cubic')
+    log_weights_grid = log_weights_func(log_ells_grid)
+    weights_grid = sp.exp(log_weights_grid)
+    weights_grid /= sum(weights_grid) 
+        
     # If user requests samples
     if num_samples > 0:
     
-        Lambda_star = (ell_star**(2.0*alpha-120))*(Delta + M_star*sp.diag(Q_star))    
+        Lambda_star = (ell_star**(2.0*alpha-1.0))*(Delta + M_star*sp.diag(Q_star))    
         eigvals, eigvecs = eig(Lambda_star)
         
         # Lambda_star is Hermetian; shouldn't need to do this
@@ -683,14 +915,16 @@ def deft_2d(xis_raw, yis_raw, bbox, G=20, alpha=2, num_samples=0, num_ts=100, ti
         # Initialize container variables      
         Qs_sampled = sp.zeros([num_samples, G, G])
         phis_sampled = sp.zeros([num_samples, V])
-        is_sampled = sp.zeros([num_samples])
-    
+        #is_sampled = sp.zeros([num_samples])
+        log_ells_sampled = sp.zeros([num_samples])
+        
         for j in range(num_samples):
             
             # First choose a classical path based on 
-            i = choice(num_ts, p=ell_weights)
-            phi_cl = phis[i,:]
-            is_sampled[j] = i
+            i = choice(K, p=weights_grid)
+            phi_cl = phis_interp_func(log_ells_grid[i])
+            #is_sampled[j] = int(i)
+            log_ells_sampled[j] = log_ells_grid[i]
         
             # Draw random amplitudes for all modes and compute dphi
             etas = randn(L)
@@ -698,8 +932,9 @@ def deft_2d(xis_raw, yis_raw, bbox, G=20, alpha=2, num_samples=0, num_ts=100, ti
     
             # Record final sampled phi 
             phi = phi_cl + dphi
-            Qs_sampled[j,:,:] = sp.reshape(sp.exp(-phi)/sum(sp.exp(-phi)), [G,G])
-            
+            Qs_sampled[j,:,:] = sp.reshape(sp.exp(-phi)/sum(sp.exp(-phi)), [G,G])            
+                   
+                                 
     ###
     ### Return results (with everything in correct lenght units!)
     ###
@@ -769,7 +1004,8 @@ def deft_2d(xis_raw, yis_raw, bbox, G=20, alpha=2, num_samples=0, num_ts=100, ti
     if num_samples > 0:
         results.phis_sampled = phis_sampled
         results.Qs_sampled = Qs_sampled/(dx*dy)
-        results.is_sampled = is_sampled
+        #results.is_sampled = is_sampled
+        results.ells_sampled = sp.exp(log_ells_sampled)*dx*dy
     
     # Stop time
     time_elapsed = time.clock() - start_time

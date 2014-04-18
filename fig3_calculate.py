@@ -54,7 +54,7 @@ for i, N in enumerate(Ns):
     print 'Performing trials for N = %d'%N
     for trial_num in range(num_trials):
         # User feedback
-        print 'Running trial number %d...'%trial_num
+        print 'Running N = %d, trial_num = %d...'%(N, trial_num)
     
         # Choose mixture of gaussians
         gaussians = make_gaussian_mix(num_gaussians)
@@ -73,9 +73,9 @@ for i, N in enumerate(Ns):
         Q_true_vals = Q_true(xs)
     
         # Perform DEFT density estimation
-        Q_star1_vals = deft_1d(xis, xint, alpha=1, G=G)(xs)
-        Q_star2_vals = deft_1d(xis, xint, alpha=2, G=G)(xs)        
-        Q_star3_vals = deft_1d(xis, xint, alpha=3, G=G)(xs)
+        Q_star1_vals = deft_1d(xis, xint, alpha=1, G=G, verbose=False)(xs)
+        Q_star2_vals = deft_1d(xis, xint, alpha=2, G=G, verbose=False)(xs)        
+        Q_star3_vals = deft_1d(xis, xint, alpha=3, G=G, verbose=False)(xs)
         
         # Perform GKDE denstiy estimation
         gkde = gaussian_kde(xis)
@@ -103,7 +103,7 @@ for i, N in enumerate(Ns):
         dists[trial_num,3, i] = geo_dist(Q_true_vals, Q_gmm_vals, dx)
         dists[trial_num,4, i] = geo_dist(Q_true_vals, Q_gkde_vals, dx)
         
-np.save('dists.npy', dists)
+#np.save('dists.npy', dists)
 
 print 'fig3_calculate.py took %.2f seconds to execute'%(time.clock()-start_time) 
 
