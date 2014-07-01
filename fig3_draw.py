@@ -91,7 +91,7 @@ plt.legend(hs, ['$N=100$', '$N=1000$', '$N=10000$'], fontsize=7, loc=2, ncol=3, 
 #plt.gca().add_artist(leg)
 
 plt.xticks([1,2,3,4,5], ['$\\alpha = 1$', '$\\alpha = 2$', '$\\alpha = 3$', 'KDE',  'GMM'])
-plt.ylabel('$D(Q_{true},Q^*)$')
+plt.ylabel('$D(Q_\mathrm{true},Q^*)$')
 plt.ylim([1E-2, 6E-1])
 plt.xlim([.5, 5.5])
 #plt.title('$n = 1$')

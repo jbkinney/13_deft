@@ -79,7 +79,7 @@ clim = [0, max(Q_true.flat[:])]
 ax = plt.subplot2grid((rows,cols),(0, 0),rowspan=3,colspan=3)
 Q_func = RectBivariateSpline(xcenters, ycenters, Q_true, bbox=bbox)
 plt.imshow(Q_func(xs, ys), interpolation='nearest', cmap=cmap)
-plt.title('$Q_{true}$', fontsize=8)
+plt.title('$Q_\mathrm{true}$', fontsize=8)
 plt.xticks([])
 plt.yticks([])
 plt.clim(clim)

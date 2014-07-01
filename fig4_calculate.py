@@ -52,7 +52,7 @@ plt.figure(figsize=[ 11.625,   6.35 ])
 # Simulation parameters
 Ns = [30, 300, 3000]
 num_Ns = len(Ns)
-G = 20 # 20x20 grid
+G = 35 # 20x20 grid
 
 # Define grid
 xmin = -5
