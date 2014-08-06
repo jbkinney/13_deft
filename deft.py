@@ -1,17 +1,16 @@
 '''
-deft.py (v1.0)
+deft.py (v1.1)
 
 Written by by Justin B. Kinney, Cold Spring Harbor Laboratory
 
-Last updated on 18 December 2013 
+Last updated on 6 August 2014 
 
 Description:
     Density Estimation using Field Theory (DEFT) in 1D and 2D
 
 Reference: 
-    Kinney, J.B. (2013) Rapid and deterministic estimation of probability 
-    densities using scale-free field theories.
-    arXiv:1312.6661 [physics.data-an].
+    Kinney JB (2014) Estimation of probability densities using scale-free field theories. 
+        Phys Rev E 90:011301(R). arXiv:1312.6661 [physics.data-an].
 
 Functions:
     deft_1d: Performs density estimation in one dimension
@@ -61,7 +60,7 @@ def get_log_det_Lambda(Lambda, coeff):
 # 1D DEFT
 ################################################################################
 def deft_1d(xis_raw, bbox, G=100, alpha=2, num_samples=0, ti_shift=-5, 
-    tf_shift=0, tol=1E-3, verbose=False, details=False):
+    tf_shift=0, tol=1E-3, verbose=False, details=False, spline_type='cubic'):
     '''
     Performs DEFT density estimation in 1D
     
@@ -97,6 +96,10 @@ def deft_1d(xis_raw, bbox, G=100, alpha=2, num_samples=0, ti_shift=-5,
         
         details: If True, calculation details are returned along with the 
             density estimate Q_star_func 
+            
+        spline_type: Type of spline with which to interpolate phi_star and thus
+            compute Q_star_func. Can be 'linear', 'nearest', 'zero', 'slinear', 
+            'quadratic', or 'cubic'; is passed to scipy.interpolate.interp1d.
             
     Returns:
         Q_star_func: A function, defined within bbox, providing a cubic spline
@@ -361,10 +364,10 @@ def deft_1d(xis_raw, bbox, G=100, alpha=2, num_samples=0, ti_shift=-5,
     log_ells_grid = sp.linspace(log_ell_f, log_ell_i, K)
     
     # Create function to get interpolated phis
-    phis_interp_func = interp1d(log_ells_raw, phis_raw, axis=0, kind='cubic')
+    phis_interp_func = interp1d(log_ells_raw, phis_raw, axis=0, kind=spline_type)
     
     # Compute weights for each ell on the fine grid
-    log_weights_func = interp1d(log_ells_raw, sp.log(ell_weights[::-1]), kind='cubic')
+    log_weights_func = interp1d(log_ells_raw, sp.log(ell_weights[::-1]), kind=spline_type)
     log_weights_grid = log_weights_func(log_ells_grid)
     weights_grid = sp.exp(log_weights_grid)
     weights_grid /= sum(weights_grid)
@@ -435,27 +438,27 @@ def deft_1d(xis_raw, bbox, G=100, alpha=2, num_samples=0, ti_shift=-5,
     results.i_star = i_star
     results.ell_star = ells[i_star]*dx
         
-    # Create interpolated Q_star. Need to extend grid to boundaries first
+    # Create interpolated phi_star. Need to extend grid to boundaries first
     extended_xgrid = sp.zeros(L+2)
     extended_xgrid[1:-1] = xgrid
     extended_xgrid[0] = xlb
     extended_xgrid[-1] = xub
     results.extended_xgrid = extended_xgrid
     
-    extended_Q_star = sp.zeros(L+2)
-    extended_Q_star[1:-1] = Q_star
-    end_Q_star = 0.5*(Q_star[0]+Q_star[-1])
-    extended_Q_star[0] = end_Q_star
-    extended_Q_star[-1] = end_Q_star
-    results.extended_Q_star = extended_Q_star/dx
-    
-    Q_star_func = interp1d(extended_xgrid, extended_Q_star/dx, kind='cubic')
+    extended_phi_star = sp.zeros(L+2)
+    extended_phi_star[1:-1] = phi_star
+    end_phi_star = 0.5*(phi_star[0]+phi_star[-1])
+    extended_phi_star[0] = end_phi_star
+    extended_phi_star[-1] = end_phi_star
+    results.extended_phi_star = extended_phi_star
+    phi_star_func = interp1d(extended_xgrid, extended_phi_star, kind='cubic')
+    Z = sp.sum(dx*sp.exp(-phi_star))
+    Q_star_func = lambda(x): sp.exp(-phi_star_func(x))/Z
     
     # If samples are requested, store those too
     if num_samples > 0:
         results.phis_sampled = phis_sampled
         results.Qs_sampled = Qs_sampled/dx
-        #results.is_sampled = is_sampled
         results.ells_sampled = sp.exp(log_ells_sampled)*dx
     
     # Stop time
@@ -616,23 +619,9 @@ def deft_2d(xis_raw, yis_raw, bbox, G=20, alpha=2, num_samples=0, tol=1E-3, ti_s
     # Invert the Fourier transform to get phi weak field approx
     phi0 = sp.ravel(sp.real(ifft2(phi_ks)))
     
-    # Let user know integration interval
-    # if verbose:    
-    #    print 'Integrating from t_i == %f to t_f == %f'%(t_i, t_f)
-    
-    # Set integrationt times
-    #ts = sp.linspace(t_i,t_f,num_ts)
-    
-    # Compute ells in terms of ts: exp(ts) = N/ell^(2 alpha - 2)
-    # Note: this is in dx = 1 units!
-    #ells = (N/sp.exp(ts))**(1.0/(2.0*alpha-2.0))
-    
     ###
     ### Integrate ODE
     ###
-    
-    # Initialize phis
-    #phis = sp.zeros([V,num_ts])
     
     # Build 2D Laplacian matrix
     delsq_2d = (-4.0*sp.eye(V) + 
@@ -673,9 +662,6 @@ def deft_2d(xis_raw, yis_raw, bbox, G=20, alpha=2, num_samples=0, tol=1E-3, ti_s
     # Will keep initial phi to check that integration is working well
     phi0_col = sp.mat(phi0).T
     kinetic0 = (phi0_col.T*Delta*phi0_col)[0,0]
-          
-    # Integrate phi over specified ts
-    #phis = odeint(this_flow, phi0, ts)
     
     # Integrate phi over specified t range. 
     integration_start_time = time.clock()
@@ -750,90 +736,8 @@ def deft_2d(xis_raw, yis_raw, bbox, G=20, alpha=2, num_samples=0, tol=1E-3, ti_s
     phis = sp.array(phis)
     Qs = sp.array(Qs)
     ells = sp.array(ells)
-    log_evidence = sp.array(log_evidence)
-    #num_ts = len(ts)        
-                            
-    ## This is the key function: computes deriviate of phi for ODE integration
-    #def this_flow(phi, t):
-    #    
-    #    # Compute distribution Q corresponding to phi
-    #    Q = sp.exp(-phi)/V
-    #    
-    #    # This matrix in invertible for all t > 0
-    #    A = Delta*sp.exp(-t) + diags(Q, 0)
-    #    
-    #    # Solve A*phidt = Q-R
-    #    dphidt = spsolve(A, Q - R_flat) 
-    #                
-    #    # Return the time derivative of phi
-    #    return dphidt
-    #    
-    ## Integrate phi over specified ts    
-    #phis = odeint(this_flow, phi0, ts)
-    #
-    ####
-    #### Identify optimal lengthscale
-    ####
-    #
-    ## Initialize containers
-    #log_evidence = sp.nan*sp.zeros(num_ts)
-    #S = sp.zeros(num_ts)
-    #log_det_Lambda = sp.zeros(num_ts)
-    #Qs = sp.zeros([num_ts, G, G])
-    #R_col = sp.mat(sp.ravel(R)).T
-    #coeff = 1.0
-    #
-    ## Compute log evidence for each t in ts
-    #for i in range(num_ts):
-    #    
-    #    # Get M corresonding to time ts[i]
-    #    t = ts[i]
-    #    
-    #    # Get lengthscale correspondin to time ts[i]
-    #    ell = ells[i]    
-    #            
-    #    # Get field at time ts[i]
-    #    phi = phis[i,:]
-    #    
-    #    # Renormalize phi just in case
-    #    Q = sp.exp(-phi)/sum(sp.exp(-phi))
-    #    phi = -sp.log(V*Q); 
-    #    phi_col = sp.mat(phi).T; 
-    #    Qs[i,:,:] = sp.reshape(Q,[L,L])
-    #    beta = ell**(2.0*alpha-2.0)
-    #    
-    #    # Compute the value of the action of classical path at ts[i] 
-    #    if all(sp.isfinite(phi_col)):
-    #        S[i] = 0.5*(phi_col.T*Delta*phi_col) + sp.exp(t)*(R_col.T*phi_col)[0,0] + sp.exp(t)
-    #    else:
-    #        S[i] = sp.inf
-    #        
-    #    # Compute exact fluctuating determinant 
-    #    # This requires dynamically fiddling with the overall scale of lambda
-    #    # to avoid infinities. Should find a more sensible way to do this
-    #    Lambda = Delta + sp.exp(t)*sp.diag(Q)
-    #    ok_value = False
-    #    while not ok_value:
-    #        f = sp.log(det(coeff*Lambda))
-    #        if f == -sp.inf:
-    #            coeff *= 1.5
-    #            #print '%d:+'%i
-    #        elif f == sp.inf:
-    #            coeff /= 1.5
-    #            #print '%d:-'%i
-    #        else: 
-    #            ok_value = True
-    #    log_det_Lambda[i] = f  - V*sp.log(coeff)
-    #    
-    #    # If i = 0, i.e. largest value of \ell, compute the deteriminant ratio
-    #    # in weak field approximation. Use to compute log_det_nc_Delta
-    #    if i == 0:
-    #        fluct_wf = t + sum(sum(sp.log(1.0 + sp.exp(t - tau_ks))))
-    #        log_det_nc_Delta = log_det_Lambda[i] - fluct_wf
-    #    
-    #    # Compute evidence for each ell with correct proportionality constant
-    #    log_evidence[i] = (N + 0.5*sp.sqrt(N) - N*sp.log(V)) - beta*S[i] - 0.5*sp.log(beta) - 0.5*(log_det_Lambda[i] - log_det_nc_Delta)
-    
+    log_evidence = sp.array(log_evidence)       
+                                
     # Noramlize weights for different ells and save
     ell_weights = sp.exp(log_evidence) - max(log_evidence)
     ell_weights[ell_weights < -100] = 0.0 
@@ -852,36 +756,6 @@ def deft_2d(xis_raw, yis_raw, bbox, G=20, alpha=2, num_samples=0, tol=1E-3, ti_s
     ###
     ### Sample from posterior (only if requirested)
     ###
-    
-    ## If user requests samples
-    #if num_samples > 0:
-    #
-    #    Lambda_star = (ell_star**(2.0*alpha-120))*(Delta + M_star*sp.diag(Q_star))    
-    #    eigvals, eigvecs = eig(Lambda_star)
-    #    
-    #    # Lambda_star is Hermetian; shouldn't need to do this
-    #    eigvals = sp.real(eigvals) 
-    #    eigvecs = sp.real(eigvecs)                      
-    #    
-    #    # Initialize container variables      
-    #    Qs_sampled = sp.zeros([num_samples, G, G])
-    #    phis_sampled = sp.zeros([num_samples, V])
-    #    is_sampled = sp.zeros([num_samples])
-    #
-    #    for j in range(num_samples):
-    #        
-    #        # First choose a classical path based on 
-    #        i = choice(num_ts, p=ell_weights)
-    #        phi_cl = phis[i,:]
-    #        is_sampled[j] = i
-    #    
-    #        # Draw random amplitudes for all modes and compute dphi
-    #        etas = randn(L)
-    #        dphi = sp.ravel(sp.real(sp.mat(eigvecs)*sp.mat(etas/sp.sqrt(eigvals)).T))
-    #
-    #        # Record final sampled phi 
-    #        phi = phi_cl + dphi
-    #        Qs_sampled[j,:,:] = sp.reshape(sp.exp(-phi)/sum(sp.exp(-phi)), [G,G])
   
     # Get ell range
     log_ells_raw = sp.log(ells)[::-1]
@@ -960,6 +834,7 @@ def deft_2d(xis_raw, yis_raw, bbox, G=20, alpha=2, num_samples=0, tol=1E-3, ti_s
     results.log_evidence = log_evidence
     
     # Comptue star results
+    phi_star = sp.reshape(phi_star,[G,G])
     results.phi_star = deepcopy(phi_star)
     results.Q_star = deepcopy(Q_star)/(dx*dy)
     results.i_star = i_star
@@ -975,36 +850,39 @@ def deft_2d(xis_raw, yis_raw, bbox, G=20, alpha=2, num_samples=0, tol=1E-3, ti_s
     extended_ygrid = sp.zeros(L+2)
     extended_ygrid[1:-1] = ygrid
     extended_ygrid[0] = ylb
-    extended_ygrid[-1] = yub
-    
-    extended_Q_star = sp.zeros([G+2, G+2])
-    extended_Q_star[1:-1,1:-1] = Q_star
+    extended_ygrid[-1] = yub 
+
+    # Extend grid for phi_star for interpolating function
+    extended_phi_star = sp.zeros([G+2, G+2])
+    extended_phi_star[1:-1,1:-1] = phi_star
     
     # Get rows
-    row = 0.5*(Q_star[0,:] + Q_star[-1,:])
-    extended_Q_star[0,1:-1] = row
-    extended_Q_star[-1,1:-1] = row
+    row = 0.5*(phi_star[0,:] + phi_star[-1,:])
+    extended_phi_star[0,1:-1] = row
+    extended_phi_star[-1,1:-1] = row
     
     # Get cols
-    col = 0.5*(Q_star[:,0] + Q_star[:,-1])
-    extended_Q_star[1:-1,0] = col
-    extended_Q_star[1:-1,-1] = col
+    col = 0.5*(phi_star[:,0] + phi_star[:,-1])
+    extended_phi_star[1:-1,0] = col
+    extended_phi_star[1:-1,-1] = col
     
     # Get remaining corners, which share the same value
     corner= 0.25*(row[0]+row[-1]+col[0]+col[-1])
-    extended_Q_star[0,0] = corner
-    extended_Q_star[0,-1] = corner
-    extended_Q_star[-1,0] = corner
-    extended_Q_star[-1,-1] = corner
+    extended_phi_star[0,0] = corner
+    extended_phi_star[0,-1] = corner
+    extended_phi_star[-1,0] = corner
+    extended_phi_star[-1,-1] = corner
 
     # Finally, compute interpolated function
-    Q_star_func = RectBivariateSpline(extended_xgrid, extended_ygrid, extended_Q_star/(dx*dy), bbox=bbox)    
+    phi_star_func = RectBivariateSpline(extended_xgrid, extended_ygrid, extended_phi_star, bbox=bbox)       
+    Z = sp.sum((dx*dy)*sp.exp(-phi_star))
+    def Q_star_func(x,y): 
+        return sp.exp(-phi_star_func(x,y))/Z      
                    
     # If samples are requested, return those too 
     if num_samples > 0:
         results.phis_sampled = phis_sampled
         results.Qs_sampled = Qs_sampled/(dx*dy)
-        #results.is_sampled = is_sampled
         results.ells_sampled = sp.exp(log_ells_sampled)*dx*dy
     
     # Stop time
