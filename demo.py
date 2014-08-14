@@ -50,7 +50,17 @@ bbox = [-5.0, 10.0]
 
 # Perform density estimation using DEFT
 start_time = time.clock()
-Q_star = deft_1d(xs, G=G, alpha=alpha, bbox=bbox)
+
+#
+# DO THIS If all you want is the distribution function
+#
+#Q_star = deft_1d(xs, G=G, alpha=alpha, bbox=bbox)
+
+#
+# DO THIS If all you want details of the computation
+#
+Q_star, results = deft_1d(xs, G=G, alpha=alpha, bbox=bbox, details=True)
+
 s =  'deft_1d with G=%d and alpha=%d took %.2f sec'%(G,alpha,time.clock()-start_time) 
 
 ###
